@@ -1,0 +1,16 @@
+com\academiq\app\service\PredictionService$1.class
+com\academiq\app\AcademiqApplication.class
+com\academiq\app\repository\OracleRepository.class
+com\academiq\app\config\WebConfig.class
+com\academiq\app\model\StudentDashboardRow.class
+com\academiq\app\model\PredictionSuggestion.class
+com\academiq\app\service\PredictionService.class
+com\academiq\app\controller\ApiController$1.class
+com\academiq\app\model\PredictRequest.class
+com\academiq\app\service\PredictionService$RuleOutcome.class
+com\academiq\app\model\PredictionResult.class
+com\academiq\app\controller\ApiController$ParseResult.class
+com\academiq\app\model\SaveRequest.class
+com\academiq\app\model\StudentInput.class
+com\academiq\app\model\SaveResult.class
+com\academiq\app\controller\ApiController.class

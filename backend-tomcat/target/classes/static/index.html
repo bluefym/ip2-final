@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ACADEMIQ — Student Performance Predictor</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script src="charts.js" defer></script>
+  </head>
+  <body>
+    <div class="app">
+      <nav class="nav">
+        <div class="nav-brand">ACADEMIQ</div>
+        <div class="nav-links">
+          <button id="navPredict" class="nav-link active" type="button">PREDICT</button>
+          <button id="navStudents" class="nav-link" type="button">STUDENTS</button>
+        </div>
+      </nav>
+
+      <main>
+        <div id="dbBanner" class="banner" style="display: none"></div>
+
+        <section id="viewPredict" class="view active">
+          <div class="card">
+            <h2>PREDICT PERFORMANCE</h2>
+            <p class="subtle">Single student analysis with immediate Oracle persistence.</p>
+
+            <form id="predictForm">
+              <div class="grid grid-3">
+                <div class="field">
+                  <label for="student_name">Student Name</label>
+                  <input id="student_name" name="student_name" type="text" required />
+                </div>
+                <div class="field">
+                  <label for="roll_number">Roll Number</label>
+                  <input id="roll_number" name="roll_number" type="text" required />
+                </div>
+                <div class="field">
+                  <label for="cgpa">CGPA</label>
+                  <input id="cgpa" name="cgpa" type="number" step="0.01" min="0" max="10" required />
+                </div>
+                <div class="field">
+                  <label for="attendance_pct">Attendance %</label>
+                  <input id="attendance_pct" name="attendance_pct" type="number" step="0.01" min="0" max="100" required />
+                </div>
+                <div class="field">
+                  <label for="assignment_marks">Assignment Marks</label>
+                  <input id="assignment_marks" name="assignment_marks" type="number" step="0.01" min="0" max="100" required />
+                </div>
+                <div class="field">
+                  <label for="engineSelect">Prediction Engine</label>
+                  <select id="engineSelect" name="engine">
+                    <option value="rule">RULE-BASED</option>
+                    <option value="llm">LLM + FALLBACK</option>
+                  </select>
+                </div>
+              </div>
+
+              <hr class="divider" />
+
+              <div class="grid grid-2">
+                <div class="field">
+                  <label>Class Behavior (1–5)</label>
+                  <div class="dot-selector" id="classBehaviorSelector"></div>
+                  <input type="hidden" id="class_behavior" name="class_behavior" value="3" />
+                </div>
+                <div class="field">
+                  <label>Lab Behavior (1–5)</label>
+                  <div class="dot-selector" id="labBehaviorSelector"></div>
+                  <input type="hidden" id="lab_behavior" name="lab_behavior" value="3" />
+                </div>
+              </div>
+
+              <div class="form-footer">
+                <p class="note">All submissions are saved to Oracle when database is available.</p>
+                <button class="btn" type="submit">RUN PREDICTION</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="card">
+            <h3>BULK CSV UPLOAD</h3>
+            <p class="subtle">CSV columns: Student Name, Roll Number, CGPA, Attendance %, Assignment Marks, Class Behavior, Lab Behavior</p>
+            <form id="bulkForm" class="btn-row">
+              <input id="csvFile" type="file" accept=".csv" required />
+              <button class="btn" type="submit">PROCESS CSV</button>
+            </form>
+            <div id="bulkReport" class="bulk-report" style="display: none"></div>
+          </div>
+
+          <div id="resultsContainer"></div>
+        </section>
+
+        <section id="viewStudents" class="view">
+          <div class="card">
+            <h2>ALL STUDENTS</h2>
+            <p class="subtle">Latest prediction for each student from Oracle.</p>
+
+            <div class="search-row">
+              <input id="studentSearch" type="text" placeholder="SEARCH BY NAME OR ROLL NUMBER" />
+              <button id="refreshStudents" type="button" class="btn btn-secondary">REFRESH</button>
+              <button id="exportCsv" type="button" class="btn">EXPORT TO CSV</button>
+            </div>
+
+            <div class="dashboard-charts">
+              <div class="dashboard-chart">
+                <p class="chart-title">RISK BREAKDOWN</p>
+                <canvas id="dashboardDonut"></canvas>
+              </div>
+              <div class="dashboard-chart">
+                <p class="chart-title">ATTENDANCE VS CGPA</p>
+                <canvas id="dashboardScatter"></canvas>
+              </div>
+              <div class="dashboard-chart">
+                <p class="chart-title">TOP 10 AT-RISK (LOWEST SCORE)</p>
+                <canvas id="dashboardRiskBar"></canvas>
+              </div>
+            </div>
+
+            <div class="table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th data-sort="roll_number">ROLL NO</th>
+                    <th data-sort="student_name">NAME</th>
+                    <th data-sort="cgpa">CGPA</th>
+                    <th data-sort="attendance_pct">ATTENDANCE</th>
+                    <th data-sort="assignment_marks">ASSIGNMENT</th>
+                    <th data-sort="behavior">BEHAVIOR</th>
+                    <th data-sort="risk_score">SCORE</th>
+                    <th data-sort="risk_level">STATUS</th>
+                  </tr>
+                </thead>
+                <tbody id="studentsTbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const state = {
+        sortKey: "risk_score",
+        sortDir: "asc",
+        students: [],
+        expandedStudentId: null,
+      };
+
+      const navPredict = document.getElementById("navPredict");
+      const navStudents = document.getElementById("navStudents");
+      const viewPredict = document.getElementById("viewPredict");
+      const viewStudents = document.getElementById("viewStudents");
+      const dbBanner = document.getElementById("dbBanner");
+      const resultsContainer = document.getElementById("resultsContainer");
+      const bulkReport = document.getElementById("bulkReport");
+      const studentsTbody = document.getElementById("studentsTbody");
+
+      function getAppBasePath() {
+        const pathname = window.location.pathname || "/";
+        let normalized = pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+
+        if (!normalized || normalized === "/") return "";
+        if (normalized.endsWith("/index.html")) {
+          normalized = normalized.slice(0, -"/index.html".length);
+        } else if (normalized.includes(".")) {
+          normalized = normalized.slice(0, normalized.lastIndexOf("/"));
+        }
+
+        return normalized === "/" ? "" : normalized;
+      }
+
+      const APP_BASE = getAppBasePath();
+
+      function apiPath(path) {
+        const cleanPath = path.startsWith("/") ? path : `/${path}`;
+        return `${APP_BASE}${cleanPath}`.replace(/\/+/g, "/");
+      }
+
+      function setActiveView(target) {
+        const isPredict = target === "predict";
+        navPredict.classList.toggle("active", isPredict);
+        navStudents.classList.toggle("active", !isPredict);
+        viewPredict.classList.toggle("active", isPredict);
+        viewStudents.classList.toggle("active", !isPredict);
+        if (!isPredict) loadStudents();
+      }
+
+      navPredict.addEventListener("click", () => setActiveView("predict"));
+      navStudents.addEventListener("click", () => setActiveView("students"));
+
+      function updateDbBanner(visible, message) {
+        dbBanner.style.display = visible ? "block" : "none";
+        dbBanner.textContent = message || "";
+      }
+
+      function createDotSelector(containerId, hiddenInputId) {
+        const container = document.getElementById(containerId);
+        const hiddenInput = document.getElementById(hiddenInputId);
+
+        function renderDots(activeValue) {
+          container.innerHTML = "";
+          for (let value = 1; value <= 5; value += 1) {
+            const dot = document.createElement("button");
+            dot.type = "button";
+            dot.className = "dot-btn" + (value <= activeValue ? " active" : "");
+            dot.addEventListener("click", () => {
+              hiddenInput.value = String(value);
+              renderDots(value);
+            });
+            container.appendChild(dot);
+          }
+        }
+
+        renderDots(Number(hiddenInput.value || 3));
+      }
+
+      function badgeMeta(level) {
+        if (level === "DANGER") {
+          return { text: "DANGER ZONE", cls: "status-danger", color: "#FF2D2D" };
+        }
+        if (level === "ATTENTION") {
+          return { text: "NEEDS ATTENTION", cls: "status-attention", color: "#FFD600" };
+        }
+        return { text: "ALL CLEAR", cls: "status-clear", color: "#00FF85" };
+      }
+
+      function safeText(value) {
+        return value === undefined || value === null ? "" : String(value);
+      }
+
+      function createSuggestionRows(suggestions) {
+        if (!Array.isArray(suggestions) || suggestions.length === 0) {
+          return `
+            <div class="suggestion-row">
+              <div class="suggestion-area">GENERAL</div>
+              <div>
+                <p class="suggestion-issue">No specific issues identified.</p>
+                <p class="suggestion-rec">Maintain current performance consistency.</p>
+              </div>
+            </div>
+          `;
+        }
+
+        return suggestions
+          .map(
+            (item) => `
+            <div class="suggestion-row">
+              <div class="suggestion-area">${safeText(item.area || "GENERAL").toUpperCase()}</div>
+              <div>
+                <p class="suggestion-issue">${safeText(item.issue)}</p>
+                <p class="suggestion-rec">${safeText(item.recommendation)}</p>
+              </div>
+            </div>
+          `
+          )
+          .join("");
+      }
+
+      function renderResultCard(entry, prepend = true) {
+        const student = entry.student;
+        const prediction = entry.prediction;
+        const meta = badgeMeta(prediction.risk_level);
+        const score = Number(prediction.risk_score || 0);
+        const canvasRadarId = `radar_${Math.random().toString(36).slice(2, 9)}`;
+        const canvasBarId = `bar_${Math.random().toString(36).slice(2, 9)}`;
+
+        const wrapper = document.createElement("div");
+        wrapper.className = "result-card";
+        wrapper.innerHTML = `
+          <div class="result-top">
+            <div class="student-identity">
+              <div class="student-name">${safeText(student.student_name)}</div>
+              <div class="student-roll">ROLL NO: ${safeText(student.roll_number)}</div>
+            </div>
+            <div class="status-badge ${meta.cls}">${meta.text}</div>
+          </div>
+
+          <div class="score-box">
+            <div class="score-value">${score.toFixed(1)} / 100</div>
+            <div class="score-bar">
+              <div class="score-fill" style="width: ${Math.max(0, Math.min(100, score))}%"></div>
+              <div class="score-tip" style="left: calc(${Math.max(0, Math.min(100, score))}% - 2px); background:${meta.color}"></div>
+            </div>
+          </div>
+
+          <div class="suggestions">
+            <div class="summary-title" style="padding-top:16px; margin-bottom:8px; font-weight:700;">SUGGESTIONS</div>
+            ${createSuggestionRows(prediction.suggestions)}
+          </div>
+
+          <div class="btn-row" style="margin-top:16px;">
+            ${
+              entry.saved
+                ? '<button class="btn btn-secondary" type="button" disabled>SAVED TO DATABASE</button>'
+                : '<button class="btn save-btn" type="button">SAVE TO DATABASE</button>'
+            }
+          </div>
+
+          <div class="student-charts">
+            <div class="chart-card">
+              <p class="chart-title">RADAR CHART</p>
+              <canvas id="${canvasRadarId}"></canvas>
+            </div>
+            <div class="chart-card">
+              <p class="chart-title">BAR CHART</p>
+              <canvas id="${canvasBarId}"></canvas>
+            </div>
+          </div>
+        `;
+
+        if (prepend) {
+          resultsContainer.prepend(wrapper);
+        } else {
+          resultsContainer.appendChild(wrapper);
+        }
+
+        window.ACADEMIQCharts.renderStudentRadar(canvasRadarId, student);
+        window.ACADEMIQCharts.renderStudentBar(canvasBarId, student);
+
+        const saveButton = wrapper.querySelector(".save-btn");
+        if (saveButton) {
+          saveButton.addEventListener("click", async () => {
+            saveButton.disabled = true;
+            saveButton.textContent = "SAVING...";
+            try {
+              const response = await fetch(apiPath("/api/save"), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ student, prediction }),
+              });
+              const data = await response.json();
+              if (!response.ok || !data.success) {
+                throw new Error((data.error && data.error.message) || "Save failed");
+              }
+              saveButton.textContent = "SAVED TO DATABASE";
+              saveButton.classList.add("btn-secondary");
+            } catch (err) {
+              saveButton.disabled = false;
+              saveButton.textContent = "SAVE TO DATABASE";
+              alert(err.message || "Unable to save record.");
+            }
+          });
+        }
+      }
+
+      async function checkHealth() {
+        try {
+          const response = await fetch(apiPath("/api/health"));
+          const data = await response.json();
+          updateDbBanner(!data.database_available, data.warning || "");
+        } catch (err) {
+          updateDbBanner(true, "DATABASE UNAVAILABLE — PREDICTIONS WILL NOT BE SAVED");
+        }
+      }
+
+      async function submitSinglePrediction(event) {
+        event.preventDefault();
+
+        const formData = new FormData(event.target);
+        const payload = Object.fromEntries(formData.entries());
+
+        const submitButton = event.target.querySelector('button[type="submit"]');
+        submitButton.disabled = true;
+        submitButton.textContent = "PROCESSING...";
+
+        try {
+          const response = await fetch(apiPath("/api/predict"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await response.json();
+
+          if (!response.ok || !data.success) {
+            const details = data.error && data.error.details ? JSON.stringify(data.error.details) : "";
+            throw new Error((data.error && data.error.message) || "Prediction failed" + details);
+          }
+
+          updateDbBanner(!data.database_available || !data.saved, data.warning || "");
+          renderResultCard(data, true);
+          event.target.reset();
+          document.getElementById("class_behavior").value = "3";
+          document.getElementById("lab_behavior").value = "3";
+          createDotSelector("classBehaviorSelector", "class_behavior");
+          createDotSelector("labBehaviorSelector", "lab_behavior");
+        } catch (err) {
+          alert(err.message || "Prediction failed.");
+        } finally {
+          submitButton.disabled = false;
+          submitButton.textContent = "RUN PREDICTION";
+        }
+      }
+
+      async function submitBulkPrediction(event) {
+        event.preventDefault();
+
+        const csvInput = document.getElementById("csvFile");
+        if (!csvInput.files || !csvInput.files.length) {
+          alert("Select a CSV file first.");
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append("file", csvInput.files[0]);
+        formData.append("engine", document.getElementById("engineSelect").value);
+
+        const button = event.target.querySelector("button[type='submit']");
+        button.disabled = true;
+        button.textContent = "PROCESSING...";
+
+        try {
+          const response = await fetch(apiPath("/api/predict/bulk"), {
+            method: "POST",
+            body: formData,
+          });
+          const data = await response.json();
+
+          if (!response.ok || !data.success) {
+            throw new Error((data.error && data.error.message) || "Bulk processing failed.");
+          }
+
+          updateDbBanner(!data.database_available, data.warning || "");
+
+          if (Array.isArray(data.results)) {
+            data.results.forEach((entry) => renderResultCard(entry, false));
+          }
+
+          const errorList = (data.errors || [])
+            .map((error) => {
+              if (error.type === "validation") {
+                return `ROW ${error.row}: ${error.details.map((x) => `${x.field} ${x.message}`).join("; ")}`;
+              }
+              return `ROW ${error.row}: ${error.message || "Database error"}`;
+            })
+            .join("<br>");
+
+          bulkReport.style.display = "block";
+          bulkReport.innerHTML = `
+            <div class="label-uppercase" style="font-weight:700; margin-bottom:8px;">BULK SUMMARY</div>
+            <div>TOTAL ROWS: ${data.total_rows}</div>
+            <div>VALID PROCESSED: ${data.processed_count}</div>
+            <div>SAVED TO DATABASE: ${data.saved_count}</div>
+            <div>ERRORS: ${data.error_count}</div>
+            <div class="bulk-errors">${errorList || "NO ROW ERRORS"}</div>
+          `;
+
+          csvInput.value = "";
+        } catch (err) {
+          alert(err.message || "Bulk prediction failed.");
+        } finally {
+          button.disabled = false;
+          button.textContent = "PROCESS CSV";
+        }
+      }
+
+      function compareValues(a, b, key) {
+        const valueA = a[key];
+        const valueB = b[key];
+
+        if (valueA === null || valueA === undefined) return 1;
+        if (valueB === null || valueB === undefined) return -1;
+
+        if (typeof valueA === "number" && typeof valueB === "number") {
+          return valueA - valueB;
+        }
+
+        return String(valueA).localeCompare(String(valueB));
+      }
+
+      function sortedStudents(input) {
+        const data = [...input];
+        const key = state.sortKey;
+
+        data.sort((a, b) => {
+          let cmp;
+          if (key === "behavior") {
+            cmp = Number(a.class_behavior || 0) + Number(a.lab_behavior || 0) - (Number(b.class_behavior || 0) + Number(b.lab_behavior || 0));
+          } else {
+            cmp = compareValues(a, b, key);
+          }
+          return state.sortDir === "asc" ? cmp : -cmp;
+        });
+
+        return data;
+      }
+
+      function tableSuggestions(student) {
+        const suggestions = Array.isArray(student.suggestions) ? student.suggestions : [];
+        if (!suggestions.length) {
+          return `<div class="suggestion-rec">No suggestions available.</div>`;
+        }
+
+        return suggestions
+          .map(
+            (item) => `
+              <div class="suggestion-row" style="border-bottom:none; padding:8px 0;">
+                <div class="suggestion-area">${safeText(item.area || "GENERAL").toUpperCase()}</div>
+                <div>
+                  <p class="suggestion-issue">${safeText(item.issue)}</p>
+                  <p class="suggestion-rec">${safeText(item.recommendation)}</p>
+                </div>
+              </div>
+            `
+          )
+          .join("");
+      }
+
+      function renderStudentsTable() {
+        const data = sortedStudents(state.students);
+
+        studentsTbody.innerHTML = "";
+        data.forEach((student) => {
+          const meta = badgeMeta(student.risk_level || "ATTENTION");
+          const row = document.createElement("tr");
+          row.innerHTML = `
+            <td>${safeText(student.roll_number)}</td>
+            <td>${safeText(student.student_name)}</td>
+            <td>${student.cgpa != null ? Number(student.cgpa).toFixed(2) : "-"}</td>
+            <td>${student.attendance_pct != null ? Number(student.attendance_pct).toFixed(2) : "-"}</td>
+            <td>${student.assignment_marks != null ? Number(student.assignment_marks).toFixed(2) : "-"}</td>
+            <td>${safeText(student.class_behavior || "-")}/5 | ${safeText(student.lab_behavior || "-")}/5</td>
+            <td>${student.risk_score != null ? Number(student.risk_score).toFixed(2) : "-"}</td>
+            <td><span class="status-badge ${meta.cls}">${meta.text}</span></td>
+          `;
+
+          row.addEventListener("click", () => {
+            state.expandedStudentId = state.expandedStudentId === student.student_id ? null : student.student_id;
+            renderStudentsTable();
+          });
+
+          studentsTbody.appendChild(row);
+
+          if (state.expandedStudentId === student.student_id) {
+            const expanded = document.createElement("tr");
+            expanded.className = "expanded-row";
+            expanded.innerHTML = `
+              <td colspan="8">
+                <div class="summary-title" style="margin-bottom:8px;">SUMMARY</div>
+                <p class="subtle" style="margin-top:0;">${safeText(student.summary || "No summary available.")}</p>
+                ${tableSuggestions(student)}
+              </td>
+            `;
+            studentsTbody.appendChild(expanded);
+          }
+        });
+
+        window.ACADEMIQCharts.renderDashboardDonut("dashboardDonut", data);
+        window.ACADEMIQCharts.renderDashboardScatter("dashboardScatter", data);
+        window.ACADEMIQCharts.renderDashboardRiskBar("dashboardRiskBar", data);
+      }
+
+      async function loadStudents() {
+        const search = document.getElementById("studentSearch").value.trim();
+        const query = search ? `?search=${encodeURIComponent(search)}` : "";
+
+        try {
+          const response = await fetch(`${apiPath("/api/students")}${query}`);
+          const data = await response.json();
+          if (!response.ok || !data.success) {
+            throw new Error((data.error && data.error.message) || "Failed to load students");
+          }
+
+          updateDbBanner(!data.database_available, data.warning || "");
+          state.students = data.students || [];
+          renderStudentsTable();
+        } catch (err) {
+          alert(err.message || "Failed to load students.");
+        }
+      }
+
+      function setupSorting() {
+        document.querySelectorAll("th[data-sort]").forEach((th) => {
+          th.addEventListener("click", () => {
+            const key = th.dataset.sort;
+            if (state.sortKey === key) {
+              state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
+            } else {
+              state.sortKey = key;
+              state.sortDir = "asc";
+            }
+            renderStudentsTable();
+          });
+        });
+      }
+
+      function setupSearch() {
+        let timeout;
+        const searchInput = document.getElementById("studentSearch");
+        searchInput.addEventListener("input", () => {
+          clearTimeout(timeout);
+          timeout = setTimeout(loadStudents, 300);
+        });
+      }
+
+      document.getElementById("predictForm").addEventListener("submit", submitSinglePrediction);
+      document.getElementById("bulkForm").addEventListener("submit", submitBulkPrediction);
+      document.getElementById("refreshStudents").addEventListener("click", loadStudents);
+      document.getElementById("exportCsv").addEventListener("click", () => {
+        window.location.href = apiPath("/api/students/export");
+      });
+
+      createDotSelector("classBehaviorSelector", "class_behavior");
+      createDotSelector("labBehaviorSelector", "lab_behavior");
+      setupSorting();
+      setupSearch();
+      checkHealth();
+    </script>
+  </body>
+</html>
