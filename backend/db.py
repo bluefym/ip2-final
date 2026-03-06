@@ -33,9 +33,21 @@ class OracleDBManager:
             return
 
         env = self._required_env()
+        service_name = os.getenv("ORACLE_SERVICE_NAME", "").strip()
 
         try:
-            dsn = oracle_driver.makedsn(env["ORACLE_HOST"], int(env["ORACLE_PORT"]), sid=env["ORACLE_SID"])
+            if service_name:
+                dsn = oracle_driver.makedsn(
+                    env["ORACLE_HOST"],
+                    int(env["ORACLE_PORT"]),
+                    service_name=service_name,
+                )
+            else:
+                dsn = oracle_driver.makedsn(
+                    env["ORACLE_HOST"],
+                    int(env["ORACLE_PORT"]),
+                    sid=env["ORACLE_SID"],
+                )
             self.pool = oracle_driver.SessionPool(
                 user=env["ORACLE_USER"],
                 password=env["ORACLE_PASSWORD"],
