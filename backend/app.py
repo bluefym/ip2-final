@@ -9,6 +9,7 @@ try:
     from dotenv import load_dotenv
 
     load_dotenv()
+    load_dotenv(os.path.join(os.path.dirname(__file__), "..", "config", ".env"))
 except Exception:
     pass
 
